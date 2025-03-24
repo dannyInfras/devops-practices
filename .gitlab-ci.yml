@@ -1,0 +1,103 @@
+stages:
+  - validate
+  - test
+  - build
+  - deploy
+
+variables:
+  AWS_DEFAULT_REGION: us-east-1  # Change to your AWS region
+  AMPLIFY_APP_ID: ${AMPLIFY_APP_ID}  # Will be set in GitLab CI/CD variables
+  AMPLIFY_BRANCH: ${AMPLIFY_BRANCH}  # Will be set in GitLab CI/CD variables
+
+# Cache dependencies between jobs
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - node_modules/
+
+# Install AWS CLI in all jobs that need it
+.aws-cli-template: &aws-cli-template
+  before_script:
+    - apt-get update -y
+    - apt-get install -y python3-pip curl unzip
+    - pip3 install awscli
+    - aws --version
+    - aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
+    - aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
+    - aws configure set region ${AWS_DEFAULT_REGION}
+
+# Validate configuration files
+validate:
+  stage: validate
+  image: node:18-alpine
+  script:
+    - npm ci
+    - npm run lint
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Run tests
+test:
+  stage: test
+  image: node:18-alpine
+  script:
+    - npm ci
+    - npm test
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Build the application
+build:
+  stage: build
+  image: node:18-alpine
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - build/
+      - dist/
+    expire_in: 1 week
+  only:
+    - main
+    - develop
+
+# Deploy to AWS Amplify
+deploy:
+  stage: deploy
+  image: python:3.9
+  <<: *aws-cli-template
+  script:
+    - echo "Triggering Amplify build for app ID ${AMPLIFY_APP_ID} on branch ${AMPLIFY_BRANCH}"
+    # Start the build job
+    - BUILD_ID=$(aws amplify start-job --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-type RELEASE --output json | jq -r '.jobSummary.jobId')
+    - echo "Started Amplify build job with ID: ${BUILD_ID}"
+    
+    # Wait for the build to complete (optional)
+    - |
+      echo "Waiting for build to complete..."
+      STATUS="PENDING"
+      while [ "$STATUS" == "PENDING" ] || [ "$STATUS" == "RUNNING" ]; do
+        sleep 30
+        JOB_INFO=$(aws amplify get-job --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-id ${BUILD_ID})
+        STATUS=$(echo $JOB_INFO | jq -r '.job.summary.status')
+        echo "Current build status: $STATUS"
+      done
+      
+      if [ "$STATUS" == "SUCCEED" ]; then
+        echo "Build completed successfully!"
+      else
+        echo "Build failed with status: $STATUS"
+        exit 1
+      fi
+  environment:
+    name: ${CI_COMMIT_REF_NAME}
+    url: https://${AMPLIFY_BRANCH}.${AMPLIFY_APP_ID}.amplifyapp.com
+  only:
+    - main
+    - develop
+
