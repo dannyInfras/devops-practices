@@ -33,8 +33,7 @@ build:
     - npm run build
   artifacts:
     paths:
-      - build/
-      - dist/
+      - .next/
     expire_in: 1 week
   only:
     - main
@@ -48,27 +47,11 @@ deploy:
   image: python:3.9
   <<: *aws-cli-template
   script:
-    - echo "Triggering Amplify build for app ID ${AMPLIFY_APP_ID} on branch ${AMPLIFY_BRANCH}"
-    # Start the build job
-    - BUILD_ID=$(aws amplify start-job --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-type RELEASE --output json | jq -r '.jobSummary.jobId')
-    
-    # Wait for the build to complete (optional)
-    - |
-      echo "Waiting for build to complete..."
-      STATUS="PENDING"
-      while [ "$STATUS" == "PENDING" ] || [ "$STATUS" == "RUNNING" ]; do
-        sleep 30
-        JOB_INFO=$(aws amplify get-job --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-id ${BUILD_ID})
-        STATUS=$(echo $JOB_INFO | jq -r '.job.summary.status')
-        echo "Current build status: $STATUS"
-      done
-      
-      if [ "$STATUS" == "SUCCEED" ]; then
-        echo "Build completed successfully!"
-      else
-        echo "Build failed with status: $STATUS"
-        exit 1
-      fi
+    - echo "Creating deployment for app ID ${AMPLIFY_APP_ID} on branch ${AMPLIFY_BRANCH}"
+    - DEPLOYMENT_ID=$(aws amplify create-deployment --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --output json | jq -r '.jobId')
+    - echo "Starting deployment with ID ${DEPLOYMENT_ID}"
+    - aws amplify start-deployment --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-id ${DEPLOYMENT_ID}
+    - echo "Deployment started. Check the AWS Amplify Console for status."
   environment:
     name: ${CI_COMMIT_REF_NAME}
     url: https://${AMPLIFY_BRANCH}.${AMPLIFY_APP_ID}.amplifyapp.com
