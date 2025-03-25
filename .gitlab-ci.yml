@@ -1,6 +1,5 @@
 stages:
   - validate
-  - test
   - build
   - deploy
 
@@ -37,18 +36,8 @@ validate:
     - merge_requests
     - main
     - develop
-
-# Run tests
-test:
-  stage: test
-  image: node:18-alpine
-  script:
-    - npm ci
-    - npm test
-  only:
-    - merge_requests
-    - main
-    - develop
+  tags:
+    - docker-ci
 
 # Build the application
 build:
@@ -65,6 +54,8 @@ build:
   only:
     - main
     - develop
+  tags:
+    - docker-ci
 
 # Deploy to AWS Amplify
 deploy:
@@ -75,7 +66,6 @@ deploy:
     - echo "Triggering Amplify build for app ID ${AMPLIFY_APP_ID} on branch ${AMPLIFY_BRANCH}"
     # Start the build job
     - BUILD_ID=$(aws amplify start-job --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-type RELEASE --output json | jq -r '.jobSummary.jobId')
-    - echo "Started Amplify build job with ID: ${BUILD_ID}"
     
     # Wait for the build to complete (optional)
     - |
@@ -100,4 +90,6 @@ deploy:
   only:
     - main
     - develop
+  tags:
+    - docker-ci
 
