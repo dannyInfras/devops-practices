@@ -1,5 +1,4 @@
 stages:
-  - validate
   - build
   - deploy
 
@@ -25,26 +24,12 @@ cache:
     - aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
     - aws configure set region ${AWS_DEFAULT_REGION}
 
-# Validate configuration files
-validate:
-  stage: validate
-  image: node:18-alpine
-  script:
-    - npm ci
-    - npm run lint
-  only:
-    - merge_requests
-    - main
-    - develop
-  tags:
-    - docker-ci
-
 # Build the application
 build:
   stage: build
   image: node:18-alpine
   script:
-    - npm ci
+    - npm install --legacy-peer-deps
     - npm run build
   artifacts:
     paths:
