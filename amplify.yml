@@ -1,0 +1,21 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm install --legacy-peer-deps
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    # For Next.js standalone output
+    baseDirectory: .next
+    files:
+      - '**/*'
+      - '../public/**/*'
+      - '../package.json'
+      - '../next.config.mjs'
+  cache:
+    paths:
+      - node_modules/**/*
+      - .next/cache/**/*

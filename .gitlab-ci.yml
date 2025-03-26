@@ -6,6 +6,7 @@ variables:
   AWS_DEFAULT_REGION: us-east-1  # Change to your AWS region
   AMPLIFY_APP_ID: ${AMPLIFY_APP_ID}  # Will be set in GitLab CI/CD variables
   AMPLIFY_BRANCH: ${AMPLIFY_BRANCH}  # Will be set in GitLab CI/CD variables
+  DEPLOYMENT_TIMEOUT: 600  # 10 minutes timeout for deployment verification
 
 # Cache dependencies between jobs
 cache:
@@ -17,7 +18,7 @@ cache:
 .aws-cli-template: &aws-cli-template
   before_script:
     - apt-get update -y
-    - apt-get install -y python3-pip curl unzip jq
+    - apt-get install -y python3-pip curl unzip jq zip
     - pip3 install awscli
     - aws --version
     - aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
@@ -29,15 +30,24 @@ build:
   stage: build
   image: node:18-alpine
   script:
+    - echo "Installing dependencies..."
     - npm install --legacy-peer-deps
+    - echo "Building Next.js application..."
     - npm run build
+    
+    - echo "Build completed successfully!"
   artifacts:
     paths:
       - .next/
+      - public/
+      - package.json
+      - next.config.mjs
+      - amplify.yml
     expire_in: 1 week
   only:
     - main
     - develop
+    - staging
   tags:
     - aws
 
@@ -47,17 +57,102 @@ deploy:
   image: python:3.9
   <<: *aws-cli-template
   script:
+    # Enable error handling
+    - set -e
+    
+    # Stop all pending or in-progress deployments for the branch
+    - echo "Stopping all pending deployments for app ID ${AMPLIFY_APP_ID} on branch ${AMPLIFY_BRANCH}"
+    - PENDING_JOBS=$(aws amplify list-jobs --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --query 'jobSummaries[?status!=`SUCCEED` && status!=`FAILED` && status!=`CANCELLED`].jobId' --output text)
+    - |
+      if [ -n "$PENDING_JOBS" ]; then
+        for job in $PENDING_JOBS; do
+          echo "Stopping pending job: $job"
+          aws amplify stop-job --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-id $job || echo "Failed to stop job $job, continuing..."
+        done
+      else
+        echo "No pending jobs found."
+      fi
+
+    # Create a new deployment
     - echo "Creating deployment for app ID ${AMPLIFY_APP_ID} on branch ${AMPLIFY_BRANCH}"
-    - DEPLOYMENT_ID=$(aws amplify create-deployment --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --output json | jq -r '.jobId')
+    - DEPLOYMENT_OUTPUT=$(aws amplify create-deployment --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --output json)
+    - |
+      if [ -z "$DEPLOYMENT_OUTPUT" ]; then
+        echo "Failed to create deployment. Empty response from AWS CLI."
+        exit 1
+      fi
+      
+      # Debug output to see the actual response structure
+      echo "Raw API response:"
+      echo "$DEPLOYMENT_OUTPUT" | jq '.'
+      
+      # Extract values using the correct JSON path for AWS Amplify API
+      DEPLOYMENT_ID=$(echo $DEPLOYMENT_OUTPUT | jq -r '.jobId')
+      UPLOAD_URL=$(echo $DEPLOYMENT_OUTPUT | jq -r '.zipUploadUrl')
+      
+      if [ -z "$DEPLOYMENT_ID" ] || [ -z "$UPLOAD_URL" ] || [ "$DEPLOYMENT_ID" = "null" ] || [ "$UPLOAD_URL" = "null" ]; then
+        echo "Failed to parse deployment information."
+        echo "Deployment output: $DEPLOYMENT_OUTPUT"
+        exit 1
+      fi
+      
+      echo "Deployment ID: $DEPLOYMENT_ID"
+      echo "Upload URL: $UPLOAD_URL"
+    
+    # Package the build artifact with all necessary files
+    - echo "Packaging build artifact..."
+    - zip -r artifact.zip .next/ public/ package.json next.config.mjs amplify.yml
+    # Upload the artifact to the provided URL
+    - echo "Uploading artifact..."
+    - |
+      if ! curl -T artifact.zip "$UPLOAD_URL"; then
+        echo "Failed to upload artifact."
+        exit 1
+      fi
+      echo "Artifact uploaded successfully."
+
+    # Start the new deployment
     - echo "Starting deployment with ID ${DEPLOYMENT_ID}"
-    - aws amplify start-deployment --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-id ${DEPLOYMENT_ID}
-    - echo "Deployment started. Check the AWS Amplify Console for status."
+    - |
+      if ! aws amplify start-deployment --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-id ${DEPLOYMENT_ID}; then
+        echo "Failed to start deployment."
+        exit 1
+      fi
+      echo "Deployment started successfully."
+    
+    # Verify deployment status
+    - echo "Waiting for deployment to complete..."
+    - |
+      START_TIME=$(date +%s)
+      while true; do
+        CURRENT_TIME=$(date +%s)
+        ELAPSED=$((CURRENT_TIME - START_TIME))
+        
+        if [ $ELAPSED -gt $DEPLOYMENT_TIMEOUT ]; then
+          echo "Deployment timed out after ${DEPLOYMENT_TIMEOUT} seconds"
+          exit 1
+        fi
+        
+        STATUS=$(aws amplify get-job --app-id ${AMPLIFY_APP_ID} --branch-name ${AMPLIFY_BRANCH} --job-id ${DEPLOYMENT_ID} --query 'job.summary.status' --output text)
+        
+        if [ "$STATUS" = "SUCCEED" ]; then
+          echo "Deployment completed successfully!"
+          break
+        elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELLED" ]; then
+          echo "Deployment failed with status: $STATUS"
+          exit 1
+        fi
+        
+        echo "Deployment status: $STATUS. Checking again in 15 seconds... (${ELAPSED}s elapsed)"
+        sleep 15
+      done
+  
   environment:
     name: ${CI_COMMIT_REF_NAME}
     url: https://${AMPLIFY_BRANCH}.${AMPLIFY_APP_ID}.amplifyapp.com
   only:
     - main
     - develop
+    - staging
   tags:
     - aws
-
