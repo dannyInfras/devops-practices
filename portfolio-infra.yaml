@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Portfolio Next.js static site on EC2 + S3 artifact store
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of existing EC2 KeyPair for SSH
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues: [t2.micro,t2.small,t2.medium]
+    Description: EC2 instance size
+  ArtifactBucketName:
+    Type: String
+    Description: Globally‑unique S3 bucket for build artifacts
+
+Resources:
+
+  ## 1) S3 Bucket for Artifact
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ArtifactBucketName
+      AccessControl: Private
+
+  ## 2) IAM Role & Profile for EC2
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: [ec2.amazonaws.com] }
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [ !Ref EC2Role ]
+
+  ## 3) Security Group
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SSH + HTTP access
+      VpcId: !Ref "AWS::NoValue"    # or supply your VPC ID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ## 4) EC2 Instance
+  PortfolioInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
+      SecurityGroupIds: [ !Ref WebSecurityGroup ]
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -ex
+          #— install NGINX + Node.js 18 + unzip + AWS CLI
+          amazon-linux-extras install -y nginx
+          yum install -y gcc-c++ make unzip
+          curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+          yum install -y nodejs
+          yum install -y aws-cli
+          #— pull artifact, extract, serve
+          mkdir -p /var/www/portfolio
+          aws s3 cp s3://${ArtifactBucketName}/artifact/portfolio.zip /tmp/portfolio.zip
+          cd /var/www/portfolio
+          unzip /tmp/portfolio.zip
+          yarn install --production || npm install --production
+          yarn build || npm run build
+          cp -r out/* /usr/share/nginx/html/
+          systemctl enable nginx
+          systemctl start nginx
+
+Outputs:
+  WebsiteURL:
+    Description: "Portfolio URL"
+    Value: !Sub http://${PortfolioInstance.PublicDnsName}/
