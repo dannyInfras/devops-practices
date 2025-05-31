@@ -69,22 +69,22 @@ export default function Contact() {
                       <span>hello@example.com</span>
                     </a>
                     <a
-                      href="https://github.com"
+                      href="https://github.com/dannyInfras"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-3 text-primary hover:underline"
                     >
                       <Github className="h-5 w-5" />
-                      <span>github.com/johndoe</span>
+                      <span>github.com/dannyInfras</span>
                     </a>
                     <a
-                      href="https://linkedin.com"
+                      href="https://www.linkedin.com/in/dao-van-dat-ab86b126a/"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-3 text-primary hover:underline"
                     >
                       <Linkedin className="h-5 w-5" />
-                      <span>linkedin.com/in/johndoe</span>
+                      <span>https://www.linkedin.com/in/dao-van-dat-ab86b126a/</span>
                     </a>
                   </div>
                 </CardContent>

@@ -1,0 +1,153 @@
+name: "CI/CD ‐ Deploy Next.js Portfolio to DigitalOcean"
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  ANSIBLE_HOST_KEY_CHECKING: "False"
+  PLAYBOOK_DIR: "./ansible"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
+    steps:
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Checkout Repository"
+      uses: actions/checkout@v3
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Configure SSH Key"
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        echo "${{ secrets.SSH_PUBLIC_KEY }}"  > ~/.ssh/id_rsa.pub
+        chmod 600 ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa.pub
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Install doctl"
+      run: |
+        curl -sL https://github.com/digitalocean/doctl/releases/download/v1.100.0/doctl-1.100.0-linux-amd64.tar.gz | tar -xz
+        sudo mv doctl /usr/local/bin
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Authenticate doctl"
+      run: doctl auth init -t "${{ secrets.DO_API_TOKEN }}"
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Check for Existing Droplet"
+      id: check-droplet
+      run: |
+        DROPLET_NAME="${{ secrets.DROPLET_NAME }}"
+        exists=$(doctl compute droplet list --format Name --no-header | grep -x "$DROPLET_NAME" || echo "")
+        if [ -z "$exists" ]; then
+          echo "exists=false" >> $GITHUB_OUTPUT
+        else
+          echo "exists=true" >> $GITHUB_OUTPUT
+        fi
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Terraform Init"
+      if: steps.check-droplet.outputs.exists == 'false'
+      working-directory: terraform
+      run: |
+        export DIGITALOCEAN_TOKEN="${{ secrets.DO_API_TOKEN }}"
+        terraform init
+
+    - name: "Terraform Apply"
+      if: steps.check-droplet.outputs.exists == 'false'
+      working-directory: terraform
+      run: |
+        terraform apply -auto-approve \
+          -var="do_token=${{ secrets.DO_API_TOKEN }}" \
+          -var="droplet_name=${{ secrets.DROPLET_NAME }}" \
+          -var="region=${{ secrets.DROPLET_REGION }}" \
+          -var="size=${{ secrets.DROPLET_SIZE }}" \
+          -var="image=${{ secrets.DROPLET_IMAGE }}" \
+          -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Get Droplet IP"
+      id: get-ip
+      run: |
+        if [ "${{ steps.check-droplet.outputs.exists }}" == "true" ]; then
+          ip=$(doctl compute droplet list --format Name,PublicIPv4 --no-header \
+               | grep -w "${{ secrets.DROPLET_NAME }}" \
+               | awk '{ print $2 }')
+        else
+          cd terraform
+          ip=$(terraform output -raw droplet_ip)
+        fi
+        echo "droplet_ip=$ip" >> $GITHUB_OUTPUT
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Add Droplet to known_hosts"
+      run: |
+        ssh-keyscan -H "${{ steps.get-ip.outputs.droplet_ip }}" >> ~/.ssh/known_hosts
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Generate Ansible Inventory"
+      run: |
+        echo "[web]" > ./ansible/inventory.ini
+        echo "${{ steps.get-ip.outputs.droplet_ip }} ansible_user=root ansible_ssh_private_key_file=/home/runner/.ssh/id_rsa" >> ./ansible/inventory.ini
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Check if Already Provisioned by Ansible"
+      id: check-provision
+      run: |
+        ip="${{ steps.get-ip.outputs.droplet_ip }}"
+        if ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@"$ip" '[ -f /etc/ansible_provisioned ]'; then
+          echo "provisioned=yes" >> $GITHUB_OUTPUT
+        else
+          echo "provisioned=no" >> $GITHUB_OUTPUT
+        fi
+
+    #   ───────────────────────────────────────────────────────────────────────────────
+    - name: "Install Ansible"
+      if: steps.check-provision.outputs.provisioned == 'no'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ansible
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Setup Node.js"
+      uses: actions/setup-node@v3
+      with:
+        node-version: "16"
+
+    - name: "Install Dependencies"
+      run: npm install
+
+    - name: "Build & Export Next.js"
+      run: |
+        npm run build
+        npx next export -o out
+
+    - name: "Create site.tar.gz"
+      run: |
+        tar -czf site.tar.gz -C out .
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    - name: "Ansible: Full Provisioning (ssh → base → nginx → app)"
+      if: steps.check-provision.outputs.provisioned == 'no'
+      run: |
+        ansible-playbook \
+          -i ./ansible/inventory.ini \
+          ./ansible/setup.yml \
+          --ssh-common-args='-o StrictHostKeyChecking=no'
+
+    - name: "Ansible: Deploy Only Static Site (app role)"
+      if: steps.check-provision.outputs.provisioned == 'yes'
+      run: |
+        ansible-playbook \
+          -i ./ansible/inventory.ini \
+          ./ansible/setup.yml \
+          --tags app \
+          --ssh-common-args='-o StrictHostKeyChecking=no'

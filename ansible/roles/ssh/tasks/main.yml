@@ -1,0 +1,13 @@
+---
+- name: "Ensure /root/.ssh directory exists"
+  file:
+    path: /root/.ssh
+    state: directory
+    mode: "0700"
+
+- name: "Add user’s public key to root’s authorized_keys"
+  authorized_key:
+    user: root
+    key: "{{ ssh_public_key }}"
+    state: present
+  when: ssh_public_key is defined and ssh_public_key != ""

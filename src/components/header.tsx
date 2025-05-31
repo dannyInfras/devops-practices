@@ -29,7 +29,7 @@ export default function Header() {
       <div className="container flex h-16 items-center justify-between">
         <div className="flex items-center">
           <a className="flex items-center space-x-2 font-bold" href="#">
-            <span className="text-xl">John Doe</span>
+            <span className="text-xl">Dao Van Dat</span>
           </a>
         </div>
 

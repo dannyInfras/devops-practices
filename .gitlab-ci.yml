@@ -3,10 +3,10 @@ stages:
   - deploy
 
 variables:
-  AWS_DEFAULT_REGION: us-east-1  # Change to your AWS region
-  AMPLIFY_APP_ID: ${AMPLIFY_APP_ID}  # Will be set in GitLab CI/CD variables
-  AMPLIFY_BRANCH: ${AMPLIFY_BRANCH}  # Will be set in GitLab CI/CD variables
-  DEPLOYMENT_TIMEOUT: 600  # 10 minutes timeout for deployment verification
+  AWS_DEFAULT_REGION: us-east-1
+  AMPLIFY_APP_ID: ${AMPLIFY_APP_ID}
+  AMPLIFY_BRANCH: ${AMPLIFY_BRANCH} 
+  DEPLOYMENT_TIMEOUT: 600
 
 # Cache dependencies between jobs
 cache:

@@ -20,7 +20,7 @@ export default function Hero() {
       >
         <div className="flex max-w-[980px] flex-col items-start gap-4">
           <h1 className="text-4xl font-extrabold leading-tight tracking-tighter md:text-5xl lg:text-6xl">
-            Hi, I'm John Doe <br className="hidden sm:inline" />
+            Hi, I'm Dao Van Dat <br className="hidden sm:inline" />
             <span className="text-primary">Full Stack Developer</span>
           </h1>
           <p className="max-w-[700px] text-lg text-muted-foreground md:text-xl">

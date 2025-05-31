@@ -1,0 +1,36 @@
+---
+- name: "Install Nginx"
+  apt:
+    name: nginx
+    state: present
+    update_cache: yes
+
+- name: "Copy custom nginx configuration"
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/sites-available/portfolio.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Ensure the default nginx site is disabled"
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+
+- name: "Enable our portfolio site"
+  file:
+    src: /etc/nginx/sites-available/portfolio.conf
+    dest: /etc/nginx/sites-enabled/portfolio.conf
+    state: link
+
+- name: "Test Nginx configuration"
+  command: nginx -t
+  register: nginx_test
+  changed_when: false
+  failed_when: nginx_test.rc != 0
+
+- name: "Restart Nginx"
+  service:
+    name: nginx
+    state: restarted

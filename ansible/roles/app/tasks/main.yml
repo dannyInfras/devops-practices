@@ -1,0 +1,31 @@
+---
+- name: "Ensure web root directory exists"
+  file:
+    path: /var/www/html
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+
+- name: "Copy the static site archive to /tmp"
+  copy:
+    src: "{{ site_archive }}"
+    dest: /tmp/site.tar.gz
+    mode: "0644"
+
+- name: "Unarchive the site into /var/www/html"
+  unarchive:
+    src: /tmp/site.tar.gz
+    dest: /var/www/html
+    copy: no
+    owner: www-data
+    group: www-data
+
+- name: "Ensure ownership & permissions on deployed files"
+  file:
+    path: /var/www/html
+    recurse: yes
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"

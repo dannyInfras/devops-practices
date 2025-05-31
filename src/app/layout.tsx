@@ -8,9 +8,9 @@ import Header from "@/components/header"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "John Doe | Full Stack Developer",
+  title: "Dao Van Dat | Full Stack Developer",
   description:
-    "Personal portfolio website of John Doe, a Full Stack Developer specializing in modern web technologies.",
+    "Personal portfolio website of Dao Van Dat, a Full Stack Developer specializing in modern web technologies.",
   keywords: ["developer", "portfolio", "react", "next.js", "web development"],
     generator: 'v0.dev'
 }
@@ -23,7 +23,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <Header />
           {children}
         </ThemeProvider>

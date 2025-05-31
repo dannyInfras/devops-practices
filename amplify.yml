@@ -8,13 +8,10 @@ frontend:
       commands:
         - npm run build
   artifacts:
-    # For Next.js standalone output
-    baseDirectory: .next
+    # For Next.js static export output
+    baseDirectory: out
     files:
       - '**/*'
-      - '../public/**/*'
-      - '../package.json'
-      - '../next.config.mjs'
   cache:
     paths:
       - node_modules/**/*

@@ -10,7 +10,7 @@ export default function About() {
         <div className="mx-auto grid max-w-5xl items-center gap-8 lg:grid-cols-2">
           <div className="flex justify-center lg:order-last">
             <div className="relative h-[300px] w-[300px] overflow-hidden rounded-full border-4 border-primary shadow-xl">
-              <Image src="/placeholder.svg?height=300&width=300" alt="Profile" fill className="object-cover" priority />
+              <Image src="/IMG_6397_jpg.jpg" alt="Profile" fill className="object-cover" priority />
             </div>
           </div>
 

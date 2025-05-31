@@ -1,0 +1,30 @@
+---
+- name: "Update apt cache & upgrade packages"
+  apt:
+    update_cache: yes
+    upgrade: dist
+    cache_valid_time: 3600
+
+- name: "Install basic utilities & fail2ban"
+  apt:
+    name:
+      - git
+      - curl
+      - unzip
+      - fail2ban
+      - ufw
+    state: present
+    update_cache: yes
+
+- name: "Ensure UFW allows SSH and HTTP"
+  ufw:
+    rule: allow
+    name: "{{ item }}"
+  loop:
+    - OpenSSH
+    - 'Nginx Full'
+
+- name: "Enable UFW"
+  ufw:
+    state: enabled
+    enabled: yes

@@ -1,0 +1,27 @@
+---
+- name: "Provision or Update Webserver"
+  hosts: web
+  become: true
+  vars:
+    site_archive: "{{ playbook_dir }}/../site.tar.gz"
+    ssh_public_key: "{{ lookup('env','SSH_PUBLIC_KEY') }}"
+  
+  roles:
+    - role: ssh
+      tags: ssh
+
+    - role: base
+      tags: base
+
+    - role: nginx
+      tags: nginx
+
+    - role: app
+      tags: app
+
+  tasks:
+    - name: "Create marker file so we know provisioning is done"
+      file:
+        path: /etc/ansible_provisioned
+        state: touch
+      tags: always
