@@ -18,11 +18,13 @@ jobs:
         working-directory: ${{ github.workspace }}
 
     steps:
-    # ───────────────────────────────────────────────────────────────────────────────
+    #───────────────────────────────────────────────────────────────────────────────
+    # 1) Check out the repository
     - name: "Checkout Repository"
       uses: actions/checkout@v3
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 2) Configure SSH keys on the runner
     - name: "Configure SSH Key"
       run: |
         mkdir -p ~/.ssh
@@ -32,21 +34,24 @@ jobs:
         chmod 600 ~/.ssh/id_rsa.pub
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 3) Install doctl so we can query existing SSH keys and Droplets
     - name: "Install doctl"
       run: |
         curl -sL https://github.com/digitalocean/doctl/releases/download/v1.100.0/doctl-1.100.0-linux-amd64.tar.gz | tar -xz
         sudo mv doctl /usr/local/bin
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 4) Authenticate doctl (DigitalOcean CLI)
     - name: "Authenticate doctl"
       run: doctl auth init -t "${{ secrets.DO_API_TOKEN }}"
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 5) Check if the “DROPLET_NAME” already exists in DO
     - name: "Check for Existing Droplet"
       id: check-droplet
       run: |
         DROPLET_NAME="${{ secrets.DROPLET_NAME }}"
-        exists=$(doctl compute droplet list --format Name --no-header | grep -x "$DROPLET_NAME" || echo "")
+        exists=$(doctl compute droplet list --no-header --format Name | grep -x "$DROPLET_NAME" || echo "")
         if [ -z "$exists" ]; then
           echo "exists=false" >> $GITHUB_OUTPUT
         else
@@ -54,12 +59,28 @@ jobs:
         fi
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 6) Check if an SSH Key named “${DROPLET_NAME}-key” already exists
+    - name: "Check for Existing SSH Key"
+      id: check-sshkey
+      run: |
+        KEY_NAME="${{ secrets.DROPLET_NAME }}-key"
+        # look for an exact match in DO’s SSH key list
+        found=$(doctl compute ssh-key list --no-header --format Name | grep -x "$KEY_NAME" || echo "")
+        if [ -z "$found" ]; then
+          echo "create_ssh_key=true" >> $GITHUB_OUTPUT
+        else
+          echo "create_ssh_key=false" >> $GITHUB_OUTPUT
+        fi
+
+    # ───────────────────────────────────────────────────────────────────────────────
+    # 7) Install Terraform (so that 'terraform init/apply' is available)
     - name: "Install Terraform via hashicorp/setup-terraform"
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: "1.5.7"
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 8) Terraform Init & Apply (only if the Droplet does NOT exist)
     - name: "Terraform Init"
       if: steps.check-droplet.outputs.exists == 'false'
       working-directory: terraform
@@ -71,20 +92,23 @@ jobs:
       if: steps.check-droplet.outputs.exists == 'false'
       working-directory: terraform
       run: |
+        export DIGITALOCEAN_TOKEN="${{ secrets.DO_API_TOKEN }}"
         terraform apply -auto-approve \
           -var="do_token=${{ secrets.DO_API_TOKEN }}" \
           -var="droplet_name=${{ secrets.DROPLET_NAME }}" \
           -var="region=${{ secrets.DROPLET_REGION }}" \
           -var="size=${{ secrets.DROPLET_SIZE }}" \
           -var="image=${{ secrets.DROPLET_IMAGE }}" \
-          -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+          -var="ssh_public_key=\"${{ secrets.SSH_PUBLIC_KEY }}\"" \
+          -var="create_ssh_key=${{ steps.check-sshkey.outputs.create_ssh_key }}"
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 9) Retrieve the Droplet IP (either from Terraform output or doctl if it already existed)
     - name: "Get Droplet IP"
       id: get-ip
       run: |
         if [ "${{ steps.check-droplet.outputs.exists }}" == "true" ]; then
-          ip=$(doctl compute droplet list --format Name,PublicIPv4 --no-header \
+          ip=$(doctl compute droplet list --no-header --format Name,PublicIPv4 \
                | grep -w "${{ secrets.DROPLET_NAME }}" \
                | awk '{ print $2 }')
         else
@@ -94,17 +118,20 @@ jobs:
         echo "droplet_ip=$ip" >> $GITHUB_OUTPUT
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 10) Add the Droplet to known_hosts (so Ansible can SSH without prompt)
     - name: "Add Droplet to known_hosts"
       run: |
         ssh-keyscan -H "${{ steps.get-ip.outputs.droplet_ip }}" >> ~/.ssh/known_hosts
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 11) Generate an Ansible inventory file pointing at our Droplet
     - name: "Generate Ansible Inventory"
       run: |
         echo "[web]" > ./ansible/inventory.ini
         echo "${{ steps.get-ip.outputs.droplet_ip }} ansible_user=root ansible_ssh_private_key_file=/home/runner/.ssh/id_rsa" >> ./ansible/inventory.ini
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 12) Check if the server is already fully provisioned (by looking for /etc/ansible_provisioned)
     - name: "Check if Already Provisioned by Ansible"
       id: check-provision
       run: |
@@ -115,7 +142,8 @@ jobs:
           echo "provisioned=no" >> $GITHUB_OUTPUT
         fi
 
-    #   ───────────────────────────────────────────────────────────────────────────────
+    # ───────────────────────────────────────────────────────────────────────────────
+    # 13) Install Ansible (only if not yet provisioned)
     - name: "Install Ansible"
       if: steps.check-provision.outputs.provisioned == 'no'
       run: |
@@ -123,13 +151,13 @@ jobs:
         sudo apt-get install -y ansible
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 14) Build Next.js, export static site, and create site.tar.gz
     - name: "Setup Node.js"
       uses: actions/setup-node@v3
       with:
-        node-version: "16"
-
+        node-version: "22.x"
     - name: "Install Dependencies"
-      run: npm install
+      run: npm install --legacy-peer-deps
 
     - name: "Build & Export Next.js"
       run: |
@@ -141,6 +169,7 @@ jobs:
         tar -czf site.tar.gz -C out .
 
     # ───────────────────────────────────────────────────────────────────────────────
+    # 15) Run the full Ansible playbook (first‐time) or just the 'app' role (subsequent)
     - name: "Ansible: Full Provisioning (ssh → base → nginx → app)"
       if: steps.check-provision.outputs.provisioned == 'no'
       run: |
