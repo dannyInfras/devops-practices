@@ -162,7 +162,6 @@ jobs:
     - name: "Build & Export Next.js"
       run: |
         npm run build
-        npx next export -o out
 
     - name: "Create site.tar.gz"
       run: |
