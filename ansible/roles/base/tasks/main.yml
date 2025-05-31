@@ -16,15 +16,23 @@
     state: present
     update_cache: yes
 
-- name: "Ensure UFW allows SSH and HTTP"
+- name: "Ensure UFW allows SSH"
   ufw:
     rule: allow
-    name: "{{ item }}"
-  loop:
-    - OpenSSH
-    - 'Nginx Full'
+    name: OpenSSH
+
+- name: "Ensure UFW allows HTTP (port 80)"
+  ufw:
+    rule: allow
+    port: 80
+    proto: tcp
+
+- name: "Ensure UFW allows HTTPS (port 443)"
+  ufw:
+    rule: allow
+    port: 443
+    proto: tcp
 
 - name: "Enable UFW"
   ufw:
     state: enabled
-    enabled: yes
